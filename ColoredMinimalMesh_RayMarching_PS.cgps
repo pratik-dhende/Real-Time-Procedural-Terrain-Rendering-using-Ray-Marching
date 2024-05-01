@@ -1,0 +1,379 @@
+#ifndef SampleWorkspace_ColoredMinimalMesh_GlowSeparation_PS_cgps_h
+#define SampleWorkspace_ColoredMinimalMesh_GlowSeparation_PS_cgps_h
+
+#include "APIAbstraction.gpu"
+#include "StandardConstants.fx"
+#include "StandardTextureResources.fx"
+#include "samplerhelper.fx"
+#include "lighthelper.fx"
+#include "ColoredMinimalMesh_Structs.fx"
+
+#define COLOR01(color) color / 255.0
+
+// Material Colors
+// Sky
+static float3 SUN_COLOR = COLOR01(float3(255.0, 255.0, 255.0));
+static float3 SKY_COLOR = COLOR01(float3(175.0, 212.0, 255.0));
+//Terrain
+static float3 GROUND_COLOR = COLOR01(float3(221.0, 167.0, 150.0));
+static float3 GRASS_COLOR = COLOR01(float3(130.0, 130.0, 9.0));
+static float3 SNOW_COLOR = float3(1.0, 1.0, 1.0) * 1.8;
+static float3 WATER_COLOR = COLOR01(float3(0.0, 84.0, 147.0));
+
+// Camera parameters
+static float CAM_HEIGHT_LEVEL = 2.5;
+static float CAM_SPEED = 0.25;
+
+// Sun parameters
+static float3 SUN_DIR = normalize(float3(0.0, 0.5, -1.0));
+
+// Cloud parameters
+static float CLOUD_SPEED = 0.02;
+
+// Water parameters.
+static float WATER_LEVEL = 1.1;
+
+// Snow parameters.
+static float SNOW_LEVEL = 1.5;
+
+// Cam utility functions
+float3x3 rotateZ(float theta)
+{
+    float c = cos(theta);
+    float s = sin(theta);
+    
+    return float3x3(
+        c, s, 0,
+       -s, c, 0,
+        0, 0, 1
+    );
+}
+
+// Noise utility functions
+
+float random(in float2 st)
+{
+    return frac(sin(dot(st.xy,
+                         float2(12.9898, 78.233))) *
+        43758.5453123);
+}
+
+float noise(in float2 st)
+{
+    float2 i = floor(st);
+    float2 f = frac(st);
+
+    // Four corners in 2D of a tile
+    float a = random(i);
+    float b = random(i + float2(1.0, 0.0));
+    float c = random(i + float2(0.0, 1.0));
+    float d = random(i + float2(1.0, 1.0));
+
+    float2 u = f * f * (3.0 - 2.0 * f);
+
+    return lerp(a, b, u.x) +
+            (c - a) * u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
+
+// FBM functions.
+float fbm(in float2 uv)
+{
+    uv /= 1.5;
+    float value = 0.;
+    float amplitude = 1.;
+    float freq = 0.8;
+    
+    for (int i = 0; i < 8; i++)
+    {
+        value = max(value, value + (.25 - abs(noise(uv * freq) - .3) * amplitude));
+        
+        amplitude *= .37;
+        
+        freq *= 2.05;
+        
+        uv = uv.yx;
+    }
+    
+    return value * 2.0 - 2.0;
+}
+
+float cloudFbm(in float2 st)    
+{
+    float value = 0.0;
+    float amplitude = .5;
+    float frequency = 0.;
+
+    for (int i = 0; i < 8; i++)
+    {
+        value += amplitude * noise(st);
+        st *= 2.;
+        amplitude *= .5;
+    }
+    return value;
+}
+
+float3 color01(float3 color255)
+{
+    return color255 / 255.0;
+}
+
+// Scene SDF
+float f(in float3 p, bool water = true)
+{
+    float h = fbm(p.xz);
+    return water ? max(WATER_LEVEL, h) : h;
+}
+
+// Normal of SDF
+float3 getNormal(float3 p, float t, bool water = true)
+{
+    float3 eps = float3(.001 * t, .0, .0);
+    float3 n = float3(f(p - eps.xyy, water) - f(p + eps.xyy, water),
+                2. * eps.x,
+                f(p - eps.yyx, water) - f(p + eps.yyx, water));
+  
+    return normalize(n);
+}
+
+// Ray March
+float rayMarching(in float3 ro, in float3 rd, float tMin, float tMax, bool water = true)
+{
+    float t = tMin;
+    for (int i = 0; i < 300; i++)
+    {
+        float3 pos = ro + t * rd;
+        float h = pos.y - f(pos, water);
+        if (abs(h) < (0.0015 * t) || t > tMax) 
+            break;
+        t += 0.4 * h;
+    }
+
+    return t;
+}
+
+// Soft shadows
+float softShadowFactor(in float3 ro, in float3 rd, float mint, float maxt, float w, bool water = true)
+{
+    float res = 1.0;
+    float t = mint;
+    for (int i = 0; i < 256 && t < maxt; i++)
+    {   
+        float3 pos = ro + t * rd;
+        float h = pos.y - f(pos, water);
+        res = min(res, h / (w * t));
+        t += clamp(h, 0.005, 0.50);
+        if (res < -1.0 || t > maxt)
+            break;
+    }
+    res = max(res, -1.0);
+    return 0.25 * (1.0 + res) * (1.0 + res) * (2.0 - res);
+}
+
+// Add fog.
+float3 applyFog(float3 col, float t, float3 sunDir, float3 rd, float3 skyColor, float3 sunColor)
+{
+    float b = 0.1;
+    float fogAmount = 1.0 - exp(-t * b);
+    float sunAmount = max(dot(rd, sunDir), 0.0);
+    float3 fogColor = lerp(skyColor, // blue
+                           sunColor * 1.1, // yellow
+                           pow(sunAmount, 50.0));
+    return lerp(col, fogColor, fogAmount);
+}
+
+// Get terrain color.
+float3 terrainMaterial(float3 p, float3 normal)
+{   
+    // Grass shading.
+    float grassLerpFactor = smoothstep(0.6, 0.7, normal.y);
+    float3 materialCol = lerp(GROUND_COLOR, GRASS_COLOR, grassLerpFactor);
+    
+    // Snow shading.
+    float snowIntensity = smoothstep(SNOW_LEVEL, SNOW_LEVEL + 0.5, p.y);
+    materialCol = lerp(materialCol, SNOW_COLOR, snowIntensity);
+    
+    return materialCol;
+}
+
+float3 phongShading(float3 p, float3 normal, float3 sunDir, float3 rd, float3 skyColor, float3 sunColor, float3 materialCol, float ks, float specularCoeff, bool water = true)
+{
+    // Light directions.
+    float3 bounceLight = -sunDir;
+    float3 sunReflection = normalize(reflect(sunDir, normal));
+    
+    // Calculate shadows
+    float shadowFactor = softShadowFactor(p, sunDir, 0.0, 20.0, 0.1, water);
+
+    // Diffused and bounce intensities.
+    float diffusedIntensity = saturate(dot(normal, sunDir));
+    float bounceIntensity = saturate(dot(normal, bounceLight));
+    
+    // Highlight.
+    float specularIntensity = pow(saturate(dot(rd, sunReflection)), specularCoeff) * ks;
+    float3 highlight = specularIntensity * sunColor;
+    
+    // Lighting
+    float3 lighting = (diffusedIntensity * shadowFactor + (0.5 * normal.y + 0.5) * skyColor / 10.0 + (bounceIntensity * GROUND_COLOR / 10.0));
+    
+    // Combined shading
+    float3 finalCol = materialCol * lighting + highlight;
+    
+    return finalCol;
+}
+
+float3 scatteredRayMarchCol(float3 ro, float3 rd, bool water)
+{
+    float3 col = float3(0.0, 0.0, 0.0);
+    
+    // Ray march.
+    float tMax = 20.0;
+    float t = rayMarching(ro, rd, 0.0, tMax, water);
+    
+    float3 p = ro + rd * t;
+    
+    float3 sunDir = SUN_DIR;
+    //sunDir = mul(rotateZ(sin(gGameTimes[0]) * 0.8), sunDir);
+    
+    float3 skyColor = SKY_COLOR - 0.4 * rd.y;
+
+    if (t < tMax)
+    {
+        // Hit the terrain.
+        float3 normal = getNormal(p, t, water);
+        
+        float3 materialCol = terrainMaterial(p, normal);
+        
+        // Apply lighting.
+        col = phongShading(p, normal, sunDir, rd, skyColor, SUN_COLOR, materialCol, 0.1, 9.0, water);
+        
+        // Apply fog.
+        col = applyFog(col, t, sunDir, rd, skyColor, SUN_COLOR);
+    }
+    else
+    {
+        // Apply fog.
+        float3 fogColor = applyFog(skyColor, t, sunDir, rd, skyColor, SUN_COLOR);
+        
+        // Add clouds.
+        float cloudHeight = 1000.0;
+        float2 samplePoint = ro.xz + rd.xz * (cloudHeight / rd.y);
+        col = lerp(fogColor, float3(1.0, 1.0, 1.0), 0.5 * smoothstep(0.5, 0.8, cloudFbm(samplePoint * 0.0005)));
+       
+        // Add horizon.
+        col = lerp(col, fogColor, pow(1.0 - max(rd.y, 0.0), 16.0));
+    }
+    
+    return col;
+}
+
+float3 sceneColor(float3 p, float3 normal, float3 sunDir, float3 rd, float3 skyColor, float3 sunColor)
+{   
+    float3 materialCol = terrainMaterial(p, normal);
+    
+    float ks = 0.1;
+    float specularCoeff = 9.0;
+    
+    float3 reflectedCol = float3(1.0, 1.0, 1.0);
+    float reflectionIntenstiy = 0.0;
+    
+    // Water shading.
+    if (p.y < WATER_LEVEL + 0.01)
+    {        
+        float3 waterReflection = normalize(reflect(rd, normal));
+        reflectionIntenstiy = 1.0 - saturate(dot(waterReflection, normal));
+        
+        reflectedCol = scatteredRayMarchCol(p, waterReflection, true);
+        
+        materialCol = WATER_COLOR;
+        ks = 1.0;
+        specularCoeff = 25.0;
+    }
+    
+    float3 phongCol = phongShading(p, normal, sunDir, rd, skyColor, sunColor, materialCol, ks, specularCoeff);
+    
+    return lerp(phongCol, reflectedCol, reflectionIntenstiy);
+}
+
+float3 rayMarchCol(float3 ro, float3 rd)
+{   
+    float3 col = float3(0.0, 0.0, 0.0);
+    
+    // Ray march.
+    float tMax = 20.0;
+    float t = rayMarching(ro, rd, 0.0, tMax);
+    
+    float3 p = ro + rd * t;
+    
+    float3 sunDir = SUN_DIR;
+    //sunDir = mul(rotateZ(sin(gGameTimes[0]) * 0.8), sunDir);
+    
+    float3 skyColor = SKY_COLOR - 0.4 * rd.y;
+
+    if (t < tMax)
+    {   
+        float tick = sin(gGameTimes[0] * 2 * 3.14 * 1.0);
+        
+        // Hit the terrain.
+        float3 normal = getNormal(p, t);
+        
+        // Apply lighting.
+        col = sceneColor(p, normal, sunDir, rd, skyColor, SUN_COLOR);
+        
+        // Apply fog.
+        col = applyFog(col, t, sunDir, rd, skyColor, SUN_COLOR);
+    }
+    else
+    {
+        // Apply fog.
+        float3 fogColor = applyFog(skyColor, t, sunDir, rd, skyColor, SUN_COLOR);
+        
+        // Add clouds.
+        float cloudHeight = 1000.0;
+        float2 samplePoint = ro.xz + rd.xz * (cloudHeight / rd.y);
+        col = lerp(fogColor, float3(1.0, 1.0, 1.0), 0.5 * smoothstep(0.5, 0.8, cloudFbm(samplePoint * 0.0005)));
+       
+        // Add horizon.
+        col = lerp(col, fogColor, pow(1.0 - max(rd.y, 0.0), 16.0));
+    }
+    
+    return col;
+}
+
+float3x3 lookAt(float3 origin, float3 target, float3 up)
+{
+    float3 look = normalize(target - origin);
+    float3 right = normalize(cross(look, up));
+    float3 realUp = normalize(cross(right, look));
+
+    return float3x3(right, realUp, -look);
+}
+
+float4 ColoredMinimalMesh_RayMarching_PS(COLORED_MINIMAL_MESH_PS_IN pIn)
+{
+    // Normalized pixel coordinates (from -1 to 1)
+    float2 uv = float2(pIn.iColor.x, 1.0 - pIn.iColor.y);
+    uv = uv * 2.0 - 1.0;
+    // Adjust for aspect ratio.
+    uv.x *= 1.0 * gWidth / gHeight;
+    
+    // Set the camera position.
+    float3 ro = float3(0.0, CAM_HEIGHT_LEVEL, -gGameTimes[0] * CAM_SPEED);
+    // Setup the lookAt matrix.
+    float3x3 viewMat = lookAt(ro, float3(0.0, CAM_HEIGHT_LEVEL, -1.0 - gGameTimes[0] * CAM_SPEED), float3(0.0, 1.0, 0.0));
+    // Get the ray direction.
+    float3 rd = normalize(mul(viewMat, float3(uv, -1.0)));
+    
+    // Get the pixel color.
+    float3 col = rayMarchCol(ro, rd);
+    
+    // Color grading
+    col = smoothstep(0.0, 1.0, col);
+
+    // Output to screen
+    return float4(col, 1.0);
+}
+
+PS_wrapper_COLORED_MINIMAL_MESH(ColoredMinimalMesh_RayMarching_PS)
+
+#endif
