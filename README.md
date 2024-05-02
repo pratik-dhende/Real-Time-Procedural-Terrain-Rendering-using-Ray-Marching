@@ -1,13 +1,16 @@
-# Real-Time-Procedural-Terrain-Rendering-using-Ray-Marching
+# Real-Time Procedural Terrain Rendering using Ray Marching
+This was implemented in a proprietary game engine called Prime Engine.
+
 ## Objective
-My objective with this project to explore and understand the following concepts:
+My objective with this project was to explore and understand the following concepts in depth:
 - Ray Marching
+  - Lighting
+  - Shadows
+  - Reflections
 - Signed Distance Functions
 - Procedural Rendering
 - Noise functions
-- Lighting using Ray Marching
-- Shadows using Ray Marching
-- Reflections using Ray Marching
+- Shader authoring
 
 ## Demo (Click on the image)
 [![Deferred Rendering Demo Video](https://github.com/pratik-dhende/Real-Time-Procedural-Terrain-Rendering-using-Ray-Marching/assets/55596801/9da60146-d27e-4e2f-80ed-bdbd07593a39)
@@ -28,3 +31,4 @@ My objective with this project to explore and understand the following concepts:
   - Sun
   - Horizon
   - Fog
+- Color grading
