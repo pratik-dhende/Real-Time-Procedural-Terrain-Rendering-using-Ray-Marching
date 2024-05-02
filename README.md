@@ -13,7 +13,8 @@ My objective with this project was to explore and understand the following conce
 - Shader authoring
 
 ## Demo
-[![RTPRMPlayThumbnail](https://github.com/pratik-dhende/Real-Time-Procedural-Terrain-Rendering-using-Ray-Marching/assets/55596801/f433bdfd-d6eb-4f0b-8951-74c254e499b7)](https://drive.google.com/file/d/1pyp7QYL8hk7qGMDU51r9H1XkvE1IsueJ/view?usp=sharing)
+[![TRPlayThumbnail](https://github.com/pratik-dhende/Real-Time-Procedural-Terrain-Rendering-using-Ray-Marching/assets/55596801/6ca4eb69-94bd-4f09-b729-90e67c66abb0)
+](https://drive.google.com/file/d/1pyp7QYL8hk7qGMDU51r9H1XkvE1IsueJ/view?usp=sharing)
 
 ## Features
 - Procedural Terrain generated using Fractal Brownian Motion.
