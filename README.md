@@ -1,5 +1,5 @@
 # Real-Time Procedural Terrain Rendering using Ray Marching
-Case study on Real-Time Procedural Terrain Rendering using Ray Marching in a proprietary game engine, Prime Engine, as one of my final projects for the `CSCI 522 Game Engine Development` course at the `University of Southern California`, earning a score of `100/100`.
+Case study on Real-Time Procedural Terrain Rendering using Ray Marching in a `proprietary` game engine, Prime Engine, as one of my final projects for the `CSCI 522 Game Engine Development` course at the `University of Southern California`, earning a score of `100/100`.
 
 ## Objective
 My objective with this project was to explore and understand the following concepts in depth:
